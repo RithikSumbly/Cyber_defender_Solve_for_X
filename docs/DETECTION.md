@@ -5,17 +5,18 @@ How SENTRY detects model extraction, why each mechanism was chosen over the comm
 ## Contents
 
 1. [What the detector observes](#1-what-the-detector-observes)
-2. [The five signals](#2-the-five-signals)
-3. [Per-key baselines and fusion](#3-per-key-baselines-and-fusion)
-4. [Leg 1: anytime-valid per-key sequential test](#4-leg-1-anytime-valid-per-key-sequential-test)
-5. [Leg 2: campaign correlation](#5-leg-2-campaign-correlation)
-6. [Leg 3: fleet specialization gap](#6-leg-3-fleet-specialization-gap)
-7. [Response: alerts and throttling](#7-response-alerts-and-throttling)
-8. [The extraction odometer](#8-the-extraction-odometer)
-9. [Design choices and the alternatives they outperform](#9-design-choices-and-the-alternatives-they-outperform)
-10. [Validation method](#10-validation-method)
-11. [Research directions for production-scale deployments](#11-research-directions-for-production-scale-deployments)
-12. [References](#12-references)
+2. [The attacks SENTRY is tested against](#2-the-attacks-sentry-is-tested-against)
+3. [The five signals](#3-the-five-signals)
+4. [Per-key baselines and fusion](#4-per-key-baselines-and-fusion)
+5. [Leg 1: anytime-valid per-key sequential test](#5-leg-1-anytime-valid-per-key-sequential-test)
+6. [Leg 2: campaign correlation](#6-leg-2-campaign-correlation)
+7. [Leg 3: fleet specialization gap](#7-leg-3-fleet-specialization-gap)
+8. [Response: alerts and throttling](#8-response-alerts-and-throttling)
+9. [The extraction odometer](#9-the-extraction-odometer)
+10. [Design choices and the alternatives they outperform](#10-design-choices-and-the-alternatives-they-outperform)
+11. [Validation method](#11-validation-method)
+12. [Research directions for production-scale deployments](#12-research-directions-for-production-scale-deployments)
+13. [References](#13-references)
 
 ---
 
@@ -33,9 +34,29 @@ SENTRY therefore watches a stream, not a request. For every answered query the i
 | top-class confidence | boundary probing |
 | 16-dimensional embedding | a fixed projection of the model's internal representation, used for distance, coverage and campaign similarity |
 
-Raw customer inputs are never stored. The detector runs as a separate operating-system process that reads this log and evaluates a 5-second trailing window for every active key once per second. Because the API never imports the detector, the inference path carries zero detection overhead (p99 `/predict` latency 26.2 ms over 56,065 requests) and keeps serving if the detector stops.
+Raw customer inputs are never stored. The detector runs as a separate operating-system process that reads this log and evaluates a 5-second trailing window for every active key once per second. Because the API never imports the detector, the inference path carries zero detection overhead (p99 `/predict` latency 20.9 ms over 56,065 requests) and keeps serving if the detector stops.
 
-## 2. The five signals
+## 2. The attacks SENTRY is tested against
+
+Every attack sends real queries over HTTP to the live inference API with valid API keys, so each request on its own is indistinguishable from legitimate use. The four strategies are chosen so that each one defeats a different simpler defence.
+
+| Attack | Strategy | What it is built to exploit | Caught by |
+|---|---|---|---|
+| **A1 high-volume flood** | One key sends 600 to 900 queries at 25 per second: half random-noise images, half natural images spread across all ten classes. | Maps the decision boundary through volume. Noise inputs draw low-confidence answers that reveal where the boundary lies. | Per-key sequential test, led by query rate |
+| **A3 boundary-probing sweep** | One key takes six seed images and sends 45 to 60 small Gaussian perturbations of each, back to back, at 8 per second. The seeds come from a sealed image pool that calibration never saw. | Probes the boundary around each seed with near-identical consecutive inputs, at a rate a volume limit ignores. | Per-key sequential test, led by distance between consecutive queries |
+| **A6 five-key split** | Five keys run concurrently at 7 per second each, sending 220 to 260 natural images matched to the normal customer class mix. | Splits one campaign across accounts so that every key stays under every per-key threshold (Sybil splitting). | Campaign correlation |
+| **A7 adaptive split** | Five keys run concurrently at 7 per second each, and every key asks only about its own pair of classes. | Built with full knowledge of the detector: keys that query disjoint classes do not resemble one another, so similarity-based grouping cannot link them. | Fleet specialization gap |
+
+The normal traffic is built to be just as demanding on the false-positive side:
+
+| Normal-user profile | Rate | Queries per session | What it stresses |
+|---|---|---|---|
+| P1 casual user | 0.5 per second | 15 to 25 | sparse, low-rate activity |
+| P2 power user | 2 per second | 50 to 70 | sustained usage across every class |
+| P3 mobile app | 1.2 per second | 25 to 40 | the typical customer class mix |
+| P4 nightly batch partner | 20 per second | 150 to 220 | the highest volume in the evaluation, above a static rate limit |
+
+## 3. The five signals
 
 The brief names four example signals. SENTRY implements all four and adds a fifth.
 
@@ -49,7 +70,7 @@ The brief names four example signals. SENTRY implements all four and adds a fift
 
 Each signal targets a different part of the extraction playbook. Legitimate users settle into a stable pattern (their coverage growth falls toward zero as they revisit familiar inputs), while an extractor keeps pushing into new territory, near the boundary, across many classes.
 
-## 3. Per-key baselines and fusion
+## 4. Per-key baselines and fusion
 
 Every signal is converted into a one-sided z-score against the **key's own** calibrated baseline:
 
@@ -62,7 +83,7 @@ Only deviations in the suspicious direction count. The signal with the largest z
 
 Per-key baselines are what let SENTRY leave the nightly batch partner alone. It runs at 20 queries per second, above a static rate limit and nearly three times the per-key rate of the split-key attackers, and it is judged against its own normal rate instead of a global limit.
 
-## 4. Leg 1: anytime-valid per-key sequential test
+## 5. Leg 1: anytime-valid per-key sequential test
 
 A detector that re-checks a fixed threshold on every one-second step is running a new hypothesis test every second. Across a long session those checks accumulate chances of a spurious crossing: a 99th-percentile threshold checked 130 times has up to a 1 - 0.99^130 (about 73%) chance of at least one false crossing. SENTRY's per-key leg uses e-values instead, which are built for continuous monitoring (Vovk & Wang, 2021).
 
@@ -73,9 +94,9 @@ For every window and every signal:
 3. **Combination.** The five e-values are averaged with fixed weights. An average of e-values is itself an e-value under *arbitrary* dependence between them (Vovk & Wang, 2021), so correlated signals combine without a second calibration stage.
 4. **Accumulation.** A Shiryaev-Roberts e-detector accumulates evidence across windows, `R_t = (1 + R_(t-1)) * E_t`, and raises an alert when `R_t >= 1/alpha` with `alpha = 0.001`, a threshold of 1,000.
 
-The alarm threshold is derived from theory, not tuned on traffic. On identical traffic, a per-window z-score threshold fires on **15.0%** of normal-user trials, while the e-value leg fires on **0.0%** (0 of 60). This leg detects the high-volume flood (A1) in 15 of 15 trials with a mean of 9.9 s, and the boundary-probing sweep from the sealed image pool (A3) in 15 of 15 trials with a mean of 9.0 s.
+The alarm threshold is derived from theory, not tuned on traffic. On identical traffic, a per-window z-score threshold fires on **31.7%** of normal-user trials, while the e-value leg fires on **0.0%** (0 of 60). This leg detects the high-volume flood (A1) in 15 of 15 trials with a mean of 8.0 s, and the boundary-probing sweep from the sealed image pool (A3) in 15 of 15 trials with a mean of 8.0 s.
 
-## 5. Leg 2: campaign correlation
+## 6. Leg 2: campaign correlation
 
 An attacker can spread one extraction campaign across many API keys so that no single key looks unusual. Published per-account detectors are defeated this way: Kabir et al. (2026) measured PRADA's F1 falling from 63.2% to 0.0% against 400 round-robin Sybil clients.
 
@@ -86,9 +107,9 @@ SENTRY evaluates keys together:
 3. Sum the members' fused scores and compare with the campaign threshold, the 99th percentile over 93 benign clusters (6.99).
 4. Fire when the same group stays above threshold for 3 consecutive polls, then throttle every member.
 
-The five-key split (A6), matched to the normal class mix and run at an individually unremarkable 7 queries per second per key, is detected in 15 of 15 trials with a mean of 5.0 s. The per-key e-value leg alone scores 0% on A6, which is exactly why the legs are combined.
+The five-key split (A6), matched to the normal class mix and run at an individually unremarkable 7 queries per second per key, is detected in 15 of 15 trials with a mean of 7.0 s. The per-key e-value leg alone scores 0% on A6, which is exactly why the legs are combined.
 
-## 6. Leg 3: fleet specialization gap
+## 7. Leg 3: fleet specialization gap
 
 A more capable attacker controls what each key asks for. Giving each key a disjoint slice of the class space (two classes per key across five keys) produces keys that are individually narrow and that do not resemble one another. Pooled together, those keys still cover the whole class space. SENTRY measures that signature directly, without needing any link between the keys:
 
@@ -98,9 +119,9 @@ gap = H(class histogram of all eligible keys pooled) - mean over keys of H(class
 
 Entropies are normalised to [0, 1]. Keys with at least 5 queries in the window are eligible, so a key that has only just started does not distort the statistic. The leg fires when the gap reaches 0.307, the 99th percentile over 349 benign fleet windows, on 3 consecutive polls.
 
-The statistic is identity-blind: it needs no account metadata and no similarity between keys. The adaptive split (A7), written with full knowledge of the detector and designed to evade similarity-based campaign grouping, is detected in 15 of 15 trials with a mean of 5.1 s.
+The statistic is identity-blind: it needs no account metadata and no similarity between keys. The adaptive split (A7), written with full knowledge of the detector and designed to evade similarity-based campaign grouping, is detected in 15 of 15 trials with a mean of 7.0 s.
 
-## 7. Response: alerts and throttling
+## 8. Response: alerts and throttling
 
 When any leg fires, SENTRY responds through all three channels the brief lists:
 
@@ -110,7 +131,7 @@ When any leg fires, SENTRY responds through all three channels the brief lists:
 
 A 15-second cooldown per key or group keeps a sustained attack from flooding the incident feed.
 
-## 8. The extraction odometer
+## 9. The extraction odometer
 
 Detection answers "is this key attacking?". The odometer answers "how much of the model has been exposed, whoever asked?". It accumulates a per-query leakage estimate over the pooled stream of every key:
 
@@ -120,16 +141,16 @@ leak(query) = (1 - confidence) * 1 / (1 + prior visits to the query's feature-sp
 
 Uncertain answers reveal more about where the decision boundary lies, and repeated regions reveal less each time. Because the stream is pooled across keys, splitting a campaign across accounts does not lower the reading. Across 60 attack episodes the odometer tracks the fidelity of the attacker's real substitute clone with Pearson **r = 0.86**.
 
-## 9. Design choices and the alternatives they outperform
+## 10. Design choices and the alternatives they outperform
 
 All comparisons below use identical logged traffic, 15 trials per cell.
 
 | Detector | A1 flood | A3 sealed sweep | A6 five-key split | A7 adaptive split | Normal-user FPR |
 |---|---|---|---|---|---|
 | Static per-key rate limit | 100% | 0% | 0% | 0% | 25.0% |
-| Distance-only (PRADA-style) | 0% | 100% | 0% | 0% | 16.7% |
-| MMD-style fixed window | 0% | 40% | 0% | 0% | 6.7% |
-| Per-window z-score threshold | 100% | 100% | 100% | 13% | 15.0% |
+| Distance-only (PRADA-style) | 0% | 100% | 0% | 0% | 20.0% |
+| MMD-style fixed window | 0% | 67% | 0% | 13% | 6.7% |
+| Per-window z-score threshold | 100% | 100% | 100% | 100% | 31.7% |
 | SENTRY leg 1 alone | 100% | 100% | 0% | 0% | 0.0% |
 | SENTRY leg 3 alone | 0% | 0% | 0% | 100% | 0.0% |
 | **SENTRY, three legs** | **100%** | **100%** | **100%** | **100%** | **0.0%** |
@@ -138,7 +159,7 @@ All comparisons below use identical logged traffic, 15 trials per cell.
 
 **Several signals instead of one.** Distance-only detection, the idea behind PRADA, catches perturbation sweeps and nothing else, and it misfires on ordinary browsing. A fixed-window distribution test picks up part of one attack family. Extraction has several behavioural fingerprints, so SENTRY measures five of them.
 
-**Sequential e-values instead of a threshold re-checked every second.** Continuous monitoring with a fixed threshold turns every second into a fresh chance of a false alarm (15.0% measured). E-values accumulate evidence with a threshold derived from theory (0.0% measured).
+**Sequential e-values instead of a threshold re-checked every second.** Continuous monitoring with a fixed threshold turns every second into a fresh chance of a false alarm (31.7% measured). E-values accumulate evidence with a threshold derived from theory (0.0% measured).
 
 **Three independent legs instead of one fused per-key score.** Per-key evidence cannot see a campaign split across keys, similarity grouping cannot see keys that deliberately differ, and the fleet statistic targets exactly that split. Each leg covers a distinct attack structure, and the combination reaches 100% on every family at 0.0% false positives. OR-combining the legs keeps every alert attributable to a named leg and signal.
 
@@ -150,46 +171,46 @@ All comparisons below use identical logged traffic, 15 trials per cell.
 
 **Compact embeddings instead of raw inputs.** A 16-dimensional projection carries the geometry the signals need while keeping customer data out of the security log.
 
-## 10. Validation method
+## 11. Validation method
 
 - **Data ledger.** Four disjoint CIFAR-10 slices: victim training (50,000 train images), calibration (test 0 to 4,999), evaluation (test 5,000 to 7,999) and a sealed attack pool (test 8,000 to 9,999). A static AST test in `make verify` fails if detector or API code imports attack-traffic or clone-training modules.
 - **Calibration.** 99th percentile of benign traffic: 1,758 per-key windows, 93 benign campaign clusters, 349 fleet windows.
 - **Protocol.** 8 scenarios, 15 trials each, 120 real-time episodes sent over HTTP at real wall-clock rates. Wilson 95% confidence intervals on every rate.
 - **Traffic.** Four normal-user profiles (0.5, 2, 1.2 and 20 queries per second) and four attackers (flood, sealed boundary-probing sweep, five-key split, adaptive split).
-- **Clones.** For every attack a substitute model is trained on the attacker's own query and label pairs and scored against the victim on a held-out probe set. Attacks are stopped after 13% to 30% of their query budget.
+- **Clones.** For every attack a substitute model is trained on the attacker's own query and label pairs and scored against the victim on a held-out probe set. Attacks are stopped after 13% to 24% of their query budget.
 - **Robustness.** `make demo` runs the acceptance test end to end and passes on back-to-back runs. `make verify` covers 14 unexpected-input cases, the fail-open guarantee and the leakage firewall.
 
 Headline result: **60 of 60** attack episodes detected (Wilson 95% CI [94.0%, 100%]) and **0 of 60** normal-user episodes flagged (Wilson 95% CI [0%, 6.0%]).
 
-## 11. Research directions for production-scale deployments
+## 12. Research directions for production-scale deployments
 
 SENTRY's architecture exposes four extension points: the per-query log, the fused suspicion score, the throttle endpoint, and the key graph built by campaign correlation. Each direction below plugs into one of them and is grounded in published work.
 
-### 11.1 Sequence-level detection that is robust to query strategy
+### 12.1 Sequence-level detection that is robust to query strategy
 
 State-of-the-art extractors choose each next query from the answers so far, using uncertainty sampling or boundary-seeking active learning (Chandrasekaran et al., 2020). Their signature is a trajectory: queries keep concentrating near a decision boundary that moves as the substitute improves. VarDetect models the full query sequence of each account in a learned latent space and flags sequences that depart from legitimate usage, independent of how the queries were selected.
 
 **In SENTRY:** a fourth leg that tracks each key's per-query novelty trajectory over the whole session. Benign sessions saturate as users revisit familiar inputs, while an active learner keeps producing new boundary-adjacent queries by design. It is calibrated on long legitimate sessions and validated against a real uncertainty-sampling attacker built on the existing substitute-model harness.
 
-### 11.2 Suspicion-proportional response shaping
+### 12.2 Suspicion-proportional response shaping
 
 Two lines of work degrade a stolen copy without needing a binary detection decision. Prediction poisoning perturbs returned probabilities so that the gradient an attacker trains on points away from the true gradient (Orekondy et al., 2020). Gradient redirection reaches the same goal far more efficiently by steering the attacker's gradient in a chosen direction (Mazeika et al., 2022). Moving-target defence adds the principle of denying the adversary a stable signal to adapt to.
 
 **In SENTRY:** use the fused score as a continuous dial. Low suspicion keeps full-fidelity answers, which covers almost all traffic. Rising suspicion applies gradient-redirected perturbation scaled to the score, and the hard threshold keeps today's throttle, delivered as latency variation instead of an explicit status code. A small set of canary query and response pairs at high suspicion provides forensic evidence if a competing model later reproduces them, following the knowledge-honeypot approach.
 
-### 11.3 Long-horizon campaigns
+### 12.3 Long-horizon campaigns
 
 An extractor willing to spread queries across days produces no anomalous five-second window. Behavioural API-security practice addresses low-and-slow abuse by correlating individually unremarkable activity over long dwell times into one continuously updated risk score.
 
 **In SENTRY:** the extraction odometer already measures cumulative exposure (r = 0.86 against real clone fidelity). The extension adds a per-key burn-rate baseline, fitted exactly like the existing per-key signal baselines, and an exponentially weighted moving average over hours to days, alerting on sustained deviation from a key's own established rate of exposure.
 
-### 11.4 Sybil correlation across thousands of keys
+### 12.4 Sybil correlation across thousands of keys
 
 Production fraud detection links accounts through many signals at once: hard links such as shared payment instruments or verified organisations, and soft links such as device, network and timing behaviour. Large-scale systems compress graphs of tens of millions of nodes, embed them (LINE) and cluster them with density-based methods (HDBSCAN) to expose coordinated rings that hard links alone miss. Graph neural networks further strengthen Sybil detection at scale.
 
 **In SENTRY:** campaign correlation becomes a multi-signal key graph. Content similarity stays as one edge weight, and **request-timing correlation** (synchronised launches, matched rates, correlated inter-arrival jitter) is added from timestamps already present in the per-query log. Billing and account links join as hard edges wherever the platform holds them. Connected components give way to community detection (Louvain or HDBSCAN) over a streaming graph store sized for fleets of thousands of keys.
 
-## 12. References
+## 13. References
 
 - Tramer, Zhang, Juels, Reiter, Ristenpart. *Stealing Machine Learning Models via Prediction APIs.* USENIX Security 2016.
 - Juuti, Szyller, Marchal, Asokan. *PRADA: Protecting Against DNN Model Stealing Attacks.* IEEE EuroS&P 2019.

@@ -10,15 +10,15 @@ A proprietary model behind a prediction API can be cloned by sending it large vo
 
 ## Results
 
-Measured over 120 real-time episodes (8 scenarios x 15 trials) sent over HTTP at real wall-clock rates. These are the figures reported in the overview deck, with full per-scenario results in `results/deck_metrics.json`. `make eval` reruns the evaluation end to end and writes a fresh `results/metrics.json`.
+Measured over 120 real-time episodes (8 scenarios x 15 trials) sent over HTTP at real wall-clock rates. Full per-scenario results are in `results/metrics.json`, regenerated end to end by `make eval`. The earlier run reported in the overview deck is kept in `results/deck_metrics.json`.
 
 | Metric | Result |
 |---|---|
 | Attack episodes detected (flood, boundary-probing sweep, five-key split, adaptive split) | **60 / 60** (Wilson 95% CI [94.0%, 100%]) |
 | False alarms across four normal-user profiles | **0 / 60** (Wilson 95% CI [0%, 6.0%]) |
-| Mean time from attack start to alert | 9.9 s, 9.0 s, 5.0 s, 5.1 s (A1, A3, A6, A7) |
-| `/predict` latency p50 / p95 / p99 | 11.1 / 18.5 / 26.2 ms over 56,065 requests |
-| Share of each attack's query budget spent before the alert | 13% to 30% |
+| Mean time from attack start to alert | 8.0 s, 8.0 s, 7.0 s, 7.0 s (A1, A3, A6, A7) |
+| `/predict` latency p50 / p95 / p99 | 10.3 / 16.3 / 20.9 ms over 56,065 requests |
+| Share of each attack's query budget spent before the alert | 13% to 24% |
 | Static per-key rate limit on the same traffic | 25.0% false alarms, and it misses A3, A6 and A7 |
 
 ### Detection matrix
@@ -28,12 +28,23 @@ Identical logged traffic for every detector, 15 trials per cell.
 | Detector | A1 flood | A3 sealed sweep | A6 five-key split | A7 adaptive split | Normal-user FPR |
 |---|---|---|---|---|---|
 | Static per-key rate limit | 100% | 0% | 0% | 0% | 25.0% |
-| Distance-only (PRADA-style) | 0% | 100% | 0% | 0% | 16.7% |
-| MMD-style fixed window | 0% | 40% | 0% | 0% | 6.7% |
-| Per-window z-score threshold | 100% | 100% | 100% | 13% | 15.0% |
+| Distance-only (PRADA-style) | 0% | 100% | 0% | 0% | 20.0% |
+| MMD-style fixed window | 0% | 67% | 0% | 13% | 6.7% |
+| Per-window z-score threshold | 100% | 100% | 100% | 100% | 31.7% |
 | SENTRY leg 1 alone (e-value) | 100% | 100% | 0% | 0% | 0.0% |
 | SENTRY leg 3 alone (fleet gap) | 0% | 0% | 0% | 100% | 0.0% |
 | **SENTRY, three legs** | **100%** | **100%** | **100%** | **100%** | **0.0%** |
+
+### Attack strategies tested
+
+| Attack | Strategy | Built to exploit | Caught by |
+|---|---|---|---|
+| A1 flood | One key, 25 queries per second, half random-noise and half natural images | Boundary mapping through sheer volume | Per-key sequential test (query rate) |
+| A3 sealed sweep | One key, 8 per second, small perturbations of six seed images from a pool calibration never saw | Near-identical consecutive probes at a modest rate | Per-key sequential test (consecutive-query distance) |
+| A6 five-key split | Five keys at 7 per second each, matched to the normal class mix | Splitting one campaign so no key crosses a per-key threshold | Campaign correlation |
+| A7 adaptive split | Five keys at 7 per second each, every key limited to its own pair of classes | Decorrelated keys that similarity-based grouping cannot link | Fleet specialization gap |
+
+Full details, including the four normal-user profiles, are in [`docs/DETECTION.md`](docs/DETECTION.md#2-the-attacks-sentry-is-tested-against).
 
 ## Why a rate limit is not enough
 
@@ -79,7 +90,7 @@ The reasoning behind each choice, the alternatives it outperforms, and the resea
 - **Data ledger with no train/test leakage.** Victim training, calibration, evaluation and a sealed attack pool are four disjoint CIFAR-10 slices. A static AST test (`tests/test_no_leakage_imports.py`, run by `make verify`) fails if detector or API code imports attack-traffic or clone-training modules.
 - **Hard traffic on both sides.** Four normal-user profiles, including the 20 qps batch partner. Four attackers: a high-volume flood, boundary-probing sweeps drawn from the sealed pool, a five-key split matched to the normal class mix, and an adaptive split built with full knowledge of the detector.
 - **Real clones.** For every attack a substitute model is trained on the attacker's own query and label pairs and scored against the victim on a held-out probe set. SENTRY's extraction odometer tracks that clone fidelity with Pearson r = 0.86 across 60 attack episodes.
-- **Statistics.** Wilson 95% confidence intervals on every rate, three published-style baselines on identical traffic, and a per-window z-score comparison that shows why sequential testing matters (15.0% false alarms against 0.0%).
+- **Statistics.** Wilson 95% confidence intervals on every rate, three published-style baselines on identical traffic, and a per-window z-score comparison that shows why sequential testing matters (31.7% false alarms against 0.0%).
 - **Robustness.** `make demo` passes on back-to-back runs. `make verify` runs 14 unexpected-input cases (forged keys, malformed base64, non-image bytes, empty and non-JSON bodies, a 6 MiB payload, null bytes and path traversal in headers), confirms fail-open by killing the detector mid-run, and runs the leakage firewall.
 
 ## Quickstart
