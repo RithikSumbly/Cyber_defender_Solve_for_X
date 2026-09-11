@@ -1,0 +1,769 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SENTRY: Live Ops</title>
+<style>
+  :root {
+    --bg: #0a0a0b; --bg-grid: rgba(205,169,75,0.045);
+    --panel: #141413; --panel2: #0d0d0d; --panel-hover: #1b1a18;
+    --border: #262521; --border-soft: #1c1b18;
+    --text: #f2efe8; --muted: #9a948a; --dim: #5c574d;
+    --accent: #d9a635; --accent-soft: rgba(217,166,53,0.14);
+    --teal: #9aa0a8; --teal-soft: rgba(154,160,168,0.10);
+    --green: #34c98d; --green-soft: rgba(52,201,141,0.14);
+    --amber: #d69454; --amber-soft: rgba(214,148,84,0.13);
+    --red: #e2536f; --red-soft: rgba(226,83,111,0.14);
+    --gold-bright: #f6c65a; --gold-dim: #6e4e12; --gold-glow: rgba(246,198,90,0.35);
+    --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:
+      radial-gradient(circle at 1px 1px, var(--bg-grid) 1px, transparent 0) 0 0/22px 22px,
+      radial-gradient(1200px 600px at 85% -10%, rgba(205,169,75,0.06), transparent 60%),
+      var(--bg);
+    color:var(--text); font-family: var(--sans); min-height:100vh;
+  }
+  ::selection { background: var(--accent-soft); }
+  .shell { display:flex; min-height:100vh; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar { width: 208px; flex: 0 0 208px; background: var(--panel2);
+             border-right: 1px solid var(--border); display:flex; flex-direction:column;
+             padding: 18px 12px; }
+  .brand { display:flex; align-items:center; gap:9px; padding: 4px 8px 18px; }
+  .brand .mark { width:26px; height:26px; border-radius:8px;
+                 background: linear-gradient(135deg, var(--gold-bright) 0%, var(--accent) 55%, var(--gold-dim) 100%);
+                 box-shadow: 0 0 14px var(--gold-glow);
+                 display:flex; align-items:center; justify-content:center;
+                 font-weight:800; font-size:13px; color:#1a1408; flex-shrink:0; }
+  .brand .name { font-weight:700; font-size:14.5px; letter-spacing:0.02em;
+                 background: linear-gradient(135deg, var(--gold-bright) 0%, var(--accent) 55%, var(--gold-dim) 100%);
+                 -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand .sub { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:0.08em; }
+
+  .navlist { display:flex; flex-direction:column; gap:2px; margin-top: 6px; }
+  .navlist button { display:flex; align-items:center; gap:10px; background:none;
+               border:none; border-left:2px solid transparent; color:var(--muted);
+               padding:9px 10px 9px 8px; border-radius:8px; font-size:13px;
+               cursor:pointer; text-align:left; font-family:var(--sans); }
+  .navlist button svg { width:16px; height:16px; flex-shrink:0; opacity:0.85; }
+  .navlist button:hover { background: var(--panel-hover); color: var(--text); }
+  .navlist button.active { background: linear-gradient(90deg, var(--accent-soft), transparent);
+               border-left-color: var(--gold-bright); color: var(--text); }
+  .navlist button.active svg { color: var(--gold-bright); opacity:1; }
+
+  .sidebar-foot { margin-top:auto; padding: 10px 10px 0; border-top:1px solid var(--border-soft);
+                  font-size:10.5px; color:var(--dim); line-height:1.5; }
+
+  /* ---------- main ---------- */
+  .main { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .topbar { display:flex; align-items:center; justify-content:space-between;
+            padding: 16px 26px; border-bottom: 1px solid var(--border); }
+  .topbar .title { display:flex; align-items:center; gap:10px; }
+  .topbar h1 { font-size:16px; margin:0; font-weight:700; letter-spacing:0.01em; }
+  .env-badge { font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+               background: linear-gradient(135deg, rgba(246,198,90,0.16), rgba(110,78,18,0.08));
+               border: 1px solid rgba(246,198,90,0.32); color: var(--gold-bright);
+               padding:2px 8px; border-radius:5px; }
+  .topbar-right { display:flex; align-items:center; gap:14px; }
+  .clock { font-family: var(--mono); font-size:12px; color:var(--dim); }
+  .pill { display:flex; align-items:center; gap:6px; padding: 5px 11px; border-radius: 999px;
+          font-size: 12px; font-weight:600; }
+  .pill .dot { width:6px; height:6px; border-radius:50%; }
+  .pill.up { background: var(--green-soft); color: var(--green); }
+  .pill.up .dot { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.6s infinite; }
+  .pill.down { background: var(--red-soft); color: var(--red); }
+  .pill.down .dot { background: var(--red); }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
+
+  .kpi-strip { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+               gap: 12px; padding: 18px 26px 0; }
+  .kpi { position:relative; background: linear-gradient(180deg, var(--panel), var(--panel2));
+         border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px;
+         overflow:hidden;
+         box-shadow: 0 1px 0 rgba(255,255,255,0.045) inset, 0 0 0 1px rgba(0,0,0,0.3) inset,
+                     0 12px 26px -16px rgba(0,0,0,0.65), 0 3px 8px -3px rgba(0,0,0,0.5); }
+  .kpi::before { content:""; position:absolute; top:0; left:8%; right:8%; height:2px;
+                 background: linear-gradient(90deg, transparent, var(--kpi-accent, var(--accent)), transparent);
+                 box-shadow: 0 0 10px var(--kpi-accent, var(--accent)); opacity:0.85; }
+  .kpi .row { display:flex; align-items:center; justify-content:space-between; }
+  .kpi svg { width:15px; height:15px; color: var(--kpi-accent, var(--accent)); opacity:0.8; }
+  .kpi .v { font-size: 24px; font-weight: 700; font-family: var(--mono); margin-top:6px; }
+  .kpi .l { font-size: 10.5px; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.06em; margin-top: 3px; }
+
+  .view { padding: 18px 26px 30px; display:none; }
+  .view.active { display:block; }
+
+  .grid2 { display:grid; grid-template-columns: 320px 1fr; gap: 18px; }
+  .panel { background: linear-gradient(180deg, var(--panel), var(--panel2));
+           border: 1px solid var(--border); border-radius: 16px; padding: 20px;
+           box-shadow: 0 1px 0 rgba(255,255,255,0.045) inset, 0 0 0 1px rgba(0,0,0,0.3) inset,
+                       0 24px 48px -24px rgba(0,0,0,0.7), 0 6px 14px -6px rgba(0,0,0,0.55); }
+  .panel h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em;
+              color: var(--muted); margin: 0 0 14px 0; display:flex; align-items:center;
+              justify-content:space-between; }
+  .group-label { font-size: 10.5px; color: var(--dim); text-transform:uppercase;
+                 letter-spacing:0.06em; margin: 16px 0 7px; }
+
+  button.scn { width:100%; text-align:left; background: linear-gradient(180deg, var(--panel-hover), var(--panel2));
+               border: 1px solid var(--border-soft); color: var(--text);
+               padding: 10px 12px; border-radius: 9px; margin-bottom: 7px;
+               cursor: pointer; font-size: 12.5px; transition: border-color .15s, transform .1s;
+               box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 4px 10px -6px rgba(0,0,0,0.55); }
+  button.scn:hover:not(:disabled) { border-color: var(--gold-bright); background: var(--panel-hover); }
+  button.scn:active:not(:disabled) { transform: translateY(1px); }
+  button.scn:disabled { opacity: 0.55; cursor: default; }
+  button.scn.running { border-color: var(--amber); color: var(--amber); }
+  button.scn .dot { display:inline-block; width:6px; height:6px; border-radius:50%;
+                     margin-right:9px; background: var(--teal); }
+  button.scn.attack .dot { background: var(--red); }
+  button.scn.running .dot { background: var(--amber); }
+
+  table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align:left; color: var(--dim); font-weight:600; font-size: 10.5px;
+       text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 9px;
+       border-bottom: 1px solid var(--border); }
+  td { padding: 8px 9px; border-bottom: 1px solid var(--border-soft); font-family: var(--mono); font-size:12px; }
+  td:nth-child(2) { font-family: var(--sans); }
+  tr:hover td { background: var(--panel-hover); }
+  tr.throttled td { color: var(--red); }
+  .badge { padding: 2px 8px; border-radius: 6px; font-size: 10.5px; font-weight:700;
+           text-transform:uppercase; letter-spacing:0.03em; }
+  .badge.on { background: var(--red-soft); color: var(--red); }
+  .badge.active { background: var(--green-soft); color: var(--green); }
+  .badge.idle { background: rgba(139,152,189,0.14); color: var(--muted); }
+  .badge.never { background: rgba(139,152,189,0.08); color: var(--dim); }
+  .badge.throttled { background: var(--red-soft); color: var(--red); }
+  .badge.attack { background: var(--red-soft); color: var(--red); }
+  .badge.benign { background: var(--green-soft); color: var(--green); }
+
+  .right-stack { display:flex; flex-direction:column; gap:18px; }
+
+  .sparkline-wrap { height: 100px; position:relative; }
+  .sparkline-wrap svg { width:100%; height:100%; display:block; }
+  .spark-legend { display:flex; gap:16px; font-size:11px; color:var(--muted); margin-top:8px; }
+  .spark-legend span { display:flex; align-items:center; gap:6px; }
+  .spark-legend i { width:8px; height:8px; border-radius:2px; display:inline-block; }
+
+  .incident { position:relative; border-radius: 12px; padding: 14px 16px 14px 18px; margin-bottom: 12px;
+              background: linear-gradient(180deg, var(--panel), var(--panel2)); border: 1px solid var(--border-soft);
+              box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 10px 22px -14px rgba(0,0,0,0.6); }
+  .incident::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:3px;
+                       background: var(--dim); }
+  .incident.critical::before { background: var(--red); box-shadow: 0 0 10px rgba(226,83,111,0.5); }
+  .incident.medium::before { background: var(--amber); box-shadow: 0 0 10px rgba(214,148,84,0.4); }
+  .incident .top { display:flex; align-items:center; gap: 9px; margin-bottom: 7px; flex-wrap: wrap; }
+  .incident .icon { width:15px; height:15px; flex-shrink:0; }
+  .incident.critical .icon { color: var(--red); }
+  .incident.medium .icon { color: var(--amber); }
+  .sev-badge { font-size: 10px; font-weight:700; text-transform:uppercase;
+               letter-spacing: 0.05em; padding: 2px 9px; border-radius: 999px; }
+  .sev-badge.critical { background: var(--red-soft); color: var(--red); }
+  .sev-badge.medium { background: var(--amber-soft); color: var(--amber); }
+  .incident .kind { font-weight:700; font-family: var(--mono); font-size:13px; }
+  .incident .meta { color: var(--dim); font-size: 11.5px; margin-left: auto; font-family: var(--mono); }
+  .incident .action { font-size: 13px; margin-bottom: 10px; color: var(--text); line-height:1.5; }
+  .incident .triage { display:flex; gap: 6px; align-items:center; flex-wrap:wrap; }
+  .triage button { background: var(--panel); border: 1px solid var(--border); font-family: var(--sans);
+                    color: var(--text); font-size: 11px; padding: 6px 11px;
+                    border-radius: 7px; cursor: pointer; }
+  .triage button:hover { border-color: var(--gold-bright); color: var(--gold-bright); }
+  .triage button.danger:hover { border-color: var(--red); color: var(--red); }
+  .status-tag { font-size: 11px; color: var(--dim); margin-left: 4px; }
+  .status-tag.resolved { color: var(--green); }
+  .status-tag.false_positive { color: var(--dim); text-decoration: line-through; }
+  .status-tag.acknowledged { color: var(--teal); }
+
+  .policy-card { background: linear-gradient(180deg, var(--panel), var(--panel2));
+                 border: 1px solid var(--border-soft);
+                 border-radius: 13px; padding: 17px 19px; margin-bottom: 14px;
+                 border-left: 3px solid var(--gold-bright);
+                 box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 12px 24px -16px rgba(0,0,0,0.6); }
+  .policy-card .name { font-weight:700; margin-bottom: 4px; font-size:13.5px; }
+  .policy-card .paper { color: var(--dim); font-size: 11px; margin-bottom: 9px; font-family: var(--mono); }
+  .policy-card .summary { font-size: 13px; margin-bottom: 10px; color:var(--muted); line-height:1.55; }
+  .policy-card .thr { font-size: 12px; color: var(--teal); font-family: var(--mono);
+                       background: var(--teal-soft); display:inline-block; padding:3px 9px; border-radius:6px; }
+
+  .empty { color: var(--dim); font-size: 13px; padding: 10px 4px; }
+  footer { padding: 10px 26px 22px; color: var(--dim); font-size: 11px; }
+
+  /* ---------- cost & impact ---------- */
+  .impact-head { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
+  .impact-head .big { font-size:28px; font-weight:800; font-family:var(--mono); color:var(--amber); }
+  .impact-head .note { font-size:11.5px; color:var(--dim); }
+  .impact-row { display:grid; grid-template-columns: 1fr 90px 90px; gap:10px; align-items:center;
+                padding:7px 0; border-bottom:1px solid var(--border-soft); font-size:12.5px; }
+  .impact-row .bar-track { grid-column: 1 / -1; height:6px; border-radius:4px; background:var(--panel2);
+                            overflow:hidden; margin-top:4px; }
+  .impact-row .bar-fill { height:100%; background: linear-gradient(90deg, var(--amber), var(--red)); }
+
+  /* ---------- expandable incident detail ---------- */
+  .detail-toggle { margin-left:auto; }
+  .incident-detail { margin-top:12px; padding-top:12px; border-top:1px solid var(--border-soft);
+                      display:flex; gap:20px; flex-wrap:wrap; }
+  .bars-col { flex: 1 1 220px; min-width:220px; }
+  .bar-row { display:grid; grid-template-columns: 96px 1fr 42px; align-items:center; gap:8px;
+             font-size:11.5px; margin-bottom:6px; font-family: var(--mono); }
+  .bar-row .track { height:7px; border-radius:4px; background:var(--panel2); overflow:hidden; }
+  .bar-row .fill { height:100%; border-radius:4px; }
+  .graph-col { flex: 0 0 180px; display:flex; align-items:center; justify-content:center; }
+
+  /* ---------- key detail modal ---------- */
+  .modal-backdrop { position:fixed; inset:0; background:rgba(4,6,14,0.68); backdrop-filter: blur(2px);
+                     display:none; align-items:center; justify-content:center; z-index:50; }
+  .modal-backdrop.open { display:flex; }
+  .modal { width:560px; max-width:92vw; max-height:84vh; overflow:auto;
+           background: linear-gradient(180deg, var(--panel), var(--panel2));
+           border:1px solid var(--border); border-radius:16px; padding:22px;
+           box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 32px 72px -24px rgba(0,0,0,0.8),
+                       0 8px 20px -8px rgba(0,0,0,0.6); }
+  .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .modal-head .key { font-family:var(--mono); font-size:16px; font-weight:700; }
+  .modal-close { background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+                 width:26px; height:26px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .modal-stats { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-bottom:18px; }
+  .modal-stats .cell { background:linear-gradient(180deg, var(--panel-hover), var(--panel2));
+                        border:1px solid var(--border-soft); border-radius:10px;
+                        padding:10px 12px;
+                        box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 6px 14px -8px rgba(0,0,0,0.5); }
+  .modal-stats .cell .v { font-family:var(--mono); font-size:17px; font-weight:700; }
+  .modal-stats .cell .l { font-size:10.5px; color:var(--dim); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+  .modal h3 { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin:16px 0 8px; }
+  .hist-wrap { display:flex; align-items:flex-end; gap:4px; height:70px; }
+  .hist-bar { flex:1; background: linear-gradient(180deg, var(--teal), var(--accent)); border-radius:3px 3px 0 0;
+              min-height:2px; position:relative; }
+  .hist-labels { display:flex; gap:4px; margin-top:4px; }
+  .hist-labels span { flex:1; text-align:center; font-size:9.5px; color:var(--dim); font-family:var(--mono); }
+  tr.clickable { cursor:pointer; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">S</div>
+      <div>
+        <div class="name">SENTRY</div>
+        <div class="sub">Extraction Monitoring</div>
+      </div>
+    </div>
+    <div class="navlist">
+      <button class="navbtn active" data-view="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Overview
+      </button>
+      <button class="navbtn" data-view="simulate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        Simulate
+      </button>
+      <button class="navbtn" data-view="inventory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="5"/><path d="M11.5 11.5 21 21"/><path d="M17 17l2 2"/></svg>
+        Key Inventory
+      </button>
+      <button class="navbtn" data-view="policy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"/></svg>
+        Detection Policy
+      </button>
+    </div>
+    <div class="sidebar-foot">
+      Deploys as a monitoring layer in front of any classification API. Reads
+      request telemetry only. Never imports the detector or touches served
+      predictions.
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="title">
+        <h1>Live Ops</h1>
+        <span class="env-badge">Demo environment</span>
+      </div>
+      <div class="topbar-right">
+        <span class="clock" id="clock">--:--:--</span>
+        <div id="api-pill" class="pill down"><span class="dot"></span>API unreachable</div>
+      </div>
+    </div>
+
+    <div class="kpi-strip">
+      <div class="kpi" style="--kpi-accent:var(--teal)">
+        <div class="row"><span class="l" style="margin:0;">Active keys</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></div>
+        <div class="v" id="kpi-active">-</div>
+      </div>
+      <div class="kpi" style="--kpi-accent:var(--red)">
+        <div class="row"><span class="l" style="margin:0;">Throttled now</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg></div>
+        <div class="v" id="kpi-throttled">-</div>
+      </div>
+      <div class="kpi" style="--kpi-accent:var(--amber)">
+        <div class="row"><span class="l" style="margin:0;">Alerts (1h)</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></div>
+        <div class="v" id="kpi-alerts1h">-</div>
+      </div>
+      <div class="kpi" style="--kpi-accent:var(--accent)">
+        <div class="row"><span class="l" style="margin:0;">Open incidents</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 12h6l3-9"/></svg></div>
+        <div class="v" id="kpi-open">-</div>
+      </div>
+      <div class="kpi" style="--kpi-accent:var(--green)">
+        <div class="row"><span class="l" style="margin:0;">Mean time to detect</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+        <div class="v" id="kpi-ttd">-</div>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="view active" id="view-overview">
+      <div class="panel" style="margin-bottom:18px;">
+        <h2>Traffic &amp; alerts: last 2 minutes</h2>
+        <div class="sparkline-wrap"><svg id="sparkline" viewBox="0 0 600 100" preserveAspectRatio="none"></svg></div>
+        <div class="spark-legend">
+          <span><i style="background:var(--teal)"></i>requests / bucket</span>
+          <span><i style="background:var(--red)"></i>alerts / bucket</span>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:18px;">
+        <h2>Cost &amp; impact: dollars, not just a percentage</h2>
+        <div class="impact-head">
+          <div class="big" id="impact-total">$0.00</div>
+          <div class="note">estimated spend by keys that have triggered an alert, at $0.01/query
+            (stated per-query price)</div>
+        </div>
+        <div id="impact-rows"></div>
+        <div id="impact-empty" class="empty">No flagged keys yet.</div>
+      </div>
+      <div class="panel">
+        <h2>Incident feed: critical (multi-key campaigns) first</h2>
+        <div id="incidents-list"></div>
+        <div id="incidents-empty" class="empty">No alerts yet. Launch a scenario from the Simulate tab.</div>
+      </div>
+    </div>
+
+    <!-- SIMULATE -->
+    <div class="view" id="view-simulate">
+      <div class="grid2">
+        <div class="panel">
+          <h2>Simulate traffic
+            <button id="reset-btn" style="background:var(--panel2); border:1px solid var(--border);
+              color:var(--muted); font-size:10.5px; padding:4px 10px; border-radius:6px; cursor:pointer;
+              text-transform:none; letter-spacing:normal; font-weight:500;">Reset traffic log</button>
+          </h2>
+          <div class="group-label">Benign personas</div>
+          <div id="benign-buttons"></div>
+          <div class="group-label">Attack scenarios</div>
+          <div id="attack-buttons"></div>
+        </div>
+        <div class="right-stack">
+          <div class="panel">
+            <h2>Active keys (last 10s window)</h2>
+            <table>
+              <thead><tr><th>Key</th><th>qps</th><th>entropy</th><th>last seen</th><th>status</th></tr></thead>
+              <tbody id="keys-body"></tbody>
+            </table>
+            <div id="keys-empty" class="empty" style="display:none;">No traffic yet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KEY INVENTORY -->
+    <div class="view" id="view-inventory">
+      <div class="panel">
+        <h2>All registered keys</h2>
+        <table>
+          <thead><tr><th>Key</th><th>Label</th><th>Demo ground truth</th><th>Status</th><th>Last seen</th></tr></thead>
+          <tbody id="inventory-body"></tbody>
+        </table>
+        <p class="empty">"Demo ground truth" is a label used only to build this dashboard's eval;
+          the live detector never reads it. See sentry/api/keys.py.</p>
+      </div>
+    </div>
+
+    <!-- DETECTION POLICY -->
+    <div class="view" id="view-policy">
+      <div class="panel" style="margin-bottom:18px;">
+        <h2>Three independent legs, OR'd</h2>
+        <div id="policy-legs"></div>
+      </div>
+      <div class="panel">
+        <h2>Calibration meta</h2>
+        <table id="policy-meta"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <footer>Polling every second. Integrates as a passive telemetry layer alongside your inference
+      API. It never touches the inference API or detector code, only the log/calibration files they already write.</footer>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="key-modal-backdrop">
+  <div class="modal" id="key-modal-body"></div>
+</div>
+
+<script>
+const SCENARIO_ORDER = [
+  ["p1-casual","p2-power","p3-mobile","p4-batch"],
+  ["a1-loud","a3-zeroday","a6-smart","a7-adaptive"],
+];
+const KIND_ICON = {
+  evalue: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2 8 4-16 2 8h6"/></svg>',
+  cluster: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="12" cy="12" r="2.5"/><path d="M8.2 7.4 10 10.3M15.8 7.4 14 10.3M8.2 16.6 10 13.7M15.8 16.6 14 13.7"/></svg>',
+  fleet_coverage: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 21 7 12 12 3 7 12 2"/><polyline points="3 12 12 17 21 12"/><polyline points="3 17 12 22 21 17"/></svg>',
+};
+let scenarioMeta = {};
+const expandedIncidents = new Set();
+const SIGNAL_COLOR = { rate: "#9aa0a8", entropy: "#f6c65a", near_duplicate: "#d69454",
+                        low_confidence: "#34c98d", coverage_growth: "#e2536f" };
+
+// --- sidebar nav ---------------------------------------------------------
+document.querySelectorAll(".navbtn").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".navbtn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("view-" + btn.dataset.view).classList.add("active");
+  };
+});
+
+function tickClock() {
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString();
+}
+tickClock(); setInterval(tickClock, 1000);
+
+function fmtAgo(s) {
+  if (s === null || s === undefined) return "-";
+  if (s < 60) return s.toFixed(1) + "s ago";
+  return Math.floor(s/60) + "m ago";
+}
+
+// --- simulate tab ---------------------------------------------------------
+async function runScenario(name) {
+  try { await fetch(`/api/run/${name}`, {method: "POST"}); } catch (e) {}
+  pollScenarios();
+}
+
+function makeButton(name, isAttack) {
+  const meta = scenarioMeta[name] || {label: name, running: false};
+  const btn = document.createElement("button");
+  btn.className = "scn" + (isAttack ? " attack" : "") + (meta.running ? " running" : "");
+  btn.disabled = !!meta.running;
+  btn.innerHTML = `<span class="dot"></span>${meta.label}${meta.running ? " (running…)" : ""}`;
+  btn.onclick = () => runScenario(name);
+  return btn;
+}
+
+function renderButtons() {
+  const benignEl = document.getElementById("benign-buttons");
+  const attackEl = document.getElementById("attack-buttons");
+  benignEl.innerHTML = ""; attackEl.innerHTML = "";
+  const [benignNames, attackNames] = SCENARIO_ORDER;
+  for (const name of benignNames) benignEl.appendChild(makeButton(name, false));
+  for (const name of attackNames) attackEl.appendChild(makeButton(name, true));
+}
+
+async function pollScenarios() {
+  try {
+    const r = await fetch("/api/scenarios");
+    scenarioMeta = await r.json();
+    renderButtons();
+  } catch (e) {}
+}
+
+document.getElementById("reset-btn").onclick = async () => {
+  const btn = document.getElementById("reset-btn");
+  btn.textContent = "resetting…"; btn.disabled = true;
+  try { await fetch("/api/reset", {method: "POST"}); } catch (e) {}
+  btn.textContent = "Reset traffic log"; btn.disabled = false;
+};
+
+async function pollFeed() {
+  let data;
+  try {
+    const r = await fetch("/api/feed");
+    data = await r.json();
+  } catch (e) {
+    setApiPill(false, "dashboard unreachable");
+    return;
+  }
+  setApiPill(data.api_up, data.api_up ? "API reachable" : "API unreachable. Is `make serve` running?");
+
+  const body = document.getElementById("keys-body");
+  const entries = Object.entries(data.keys).sort((a,b) => b[1].n_recent - a[1].n_recent);
+  body.innerHTML = "";
+  document.getElementById("keys-empty").style.display = entries.length ? "none" : "block";
+  for (const [key, k] of entries) {
+    if (k.n_recent === 0 && (k.last_seen_s_ago === null || k.last_seen_s_ago > 30)) continue;
+    const tr = document.createElement("tr");
+    tr.className = "clickable" + (k.throttled ? " throttled" : "");
+    tr.innerHTML = `<td>${key}</td><td>${k.rate_qps}</td><td>${k.entropy}</td>
+      <td>${fmtAgo(k.last_seen_s_ago)}</td>
+      <td>${k.throttled ? '<span class="badge on">throttled</span>' : ''}</td>`;
+    tr.onclick = () => openKeyDetail(key);
+    body.appendChild(tr);
+  }
+}
+
+// --- shared: mini bar chart + campaign graph -----------------------------
+function barRow(label, value, max, color) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return `<div class="bar-row">
+    <span>${label}</span>
+    <span class="track"><span class="fill" style="width:${pct}%;background:${color}"></span></span>
+    <span>${value.toFixed(2)}</span>
+  </div>`;
+}
+
+function campaignGraph(keys, color) {
+  const cx = 90, cy = 85, r = 58;
+  const nodes = keys.map((k, i) => {
+    const angle = (i / keys.length) * 2 * Math.PI - Math.PI / 2;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), key: k };
+  });
+  const edges = nodes.map(n => `<line x1="${cx}" y1="${cy}" x2="${n.x}" y2="${n.y}" stroke="${color}" stroke-width="1.5" opacity="0.45"/>`).join("");
+  const dots = nodes.map(n => `<circle cx="${n.x}" cy="${n.y}" r="6" fill="${color}"/>
+    <text x="${n.x}" y="${n.y - 11}" text-anchor="middle" font-size="8" fill="#9a948a" font-family="monospace">${n.key.replace(/^(A\d+-\w+-)/,"")}</text>`).join("");
+  return `<svg viewBox="0 0 180 170" width="180" height="170">
+    ${edges}
+    <circle cx="${cx}" cy="${cy}" r="9" fill="${color}" opacity="0.9"/>
+    <text x="${cx}" y="${cy+3}" text-anchor="middle" font-size="8" fill="#0a0a0b" font-weight="700">×${keys.length}</text>
+    ${dots}
+  </svg>`;
+}
+
+function incidentDetailHtml(a) {
+  if (a.kind === "evalue" && a.z_breakdown) {
+    const max = Math.max(0.1, ...Object.values(a.z_breakdown));
+    const bars = Object.entries(a.z_breakdown).map(([k,v]) => barRow(k, v, max, SIGNAL_COLOR[k] || "#f6c65a")).join("");
+    return `<div class="incident-detail">
+      <div class="bars-col"><div style="font-size:10.5px;color:var(--dim);margin-bottom:6px;">z-score per signal (which one fired)</div>${bars}</div>
+    </div>`;
+  }
+  if (a.kind === "cluster" && a.member_scores) {
+    const vals = Object.values(a.member_scores);
+    const max = Math.max(0.1, ...vals);
+    const bars = Object.entries(a.member_scores).map(([k,v]) => barRow(k.replace(/^(A\d+-\w+-)/,""), v, max, "#d69454")).join("");
+    return `<div class="incident-detail">
+      <div class="bars-col"><div style="font-size:10.5px;color:var(--dim);margin-bottom:6px;">per-member fused z-score (summed to trip this)</div>${bars}</div>
+      <div class="graph-col">${campaignGraph(a.keys, "#d69454")}</div>
+    </div>`;
+  }
+  if (a.kind === "fleet_coverage" && a.individual_entropies) {
+    const vals = Object.values(a.individual_entropies);
+    const max = Math.max(0.1, a.pooled_entropy || 0, ...vals);
+    let bars = barRow("pooled (fleet)", a.pooled_entropy || 0, max, "#e2536f");
+    bars += Object.entries(a.individual_entropies).map(([k,v]) => barRow(k.replace(/^(A\d+-\w+-)/,""), v, max, "#9aa0a8")).join("");
+    return `<div class="incident-detail">
+      <div class="bars-col"><div style="font-size:10.5px;color:var(--dim);margin-bottom:6px;">pooled entropy vs. each key's own (the gap is the signal)</div>${bars}</div>
+      <div class="graph-col">${campaignGraph(a.keys, "#e2536f")}</div>
+    </div>`;
+  }
+  return `<div class="incident-detail"><span class="empty">No raw signal breakdown logged for this alert (older alerts.jsonl format).</span></div>`;
+}
+
+// --- key detail modal ------------------------------------------------
+function closeKeyModal() { document.getElementById("key-modal-backdrop").classList.remove("open"); }
+document.getElementById("key-modal-backdrop").onclick = (e) => {
+  if (e.target.id === "key-modal-backdrop") closeKeyModal();
+};
+
+async function openKeyDetail(key) {
+  let d;
+  try { d = await (await fetch(`/api/keys/${key}/detail`)).json(); } catch (e) { return; }
+  const maxClass = Math.max(1, ...d.class_hist);
+  const classBars = d.class_hist.map(v => `<div class="hist-bar" style="height:${Math.max(2,(v/maxClass)*70)}px" title="${v}"></div>`).join("");
+  const classLabels = d.class_hist.map((_,i) => `<span>${i}</span>`).join("");
+
+  const body = document.getElementById("key-modal-body");
+  body.innerHTML = `
+    <div class="modal-head">
+      <span class="key">${d.key}</span>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-stats">
+      <div class="cell"><div class="v">${d.n_queries}</div><div class="l">queries seen</div></div>
+      <div class="cell"><div class="v">$${d.cost_usd.toFixed(2)}</div><div class="l">est. cost @ $0.01/q</div></div>
+      <div class="cell"><div class="v">${d.mean_confidence !== null ? d.mean_confidence : "-"}</div><div class="l">mean confidence</div></div>
+    </div>
+    <h3>Class distribution (which of the 10 classes this key queried)</h3>
+    <div class="hist-wrap">${classBars || '<span class="empty">no data</span>'}</div>
+    <div class="hist-labels">${classLabels}</div>
+  `;
+  document.getElementById("modal-close-btn").onclick = closeKeyModal;
+  document.getElementById("key-modal-backdrop").classList.add("open");
+}
+
+function setApiPill(up, text) {
+  const pill = document.getElementById("api-pill");
+  pill.className = "pill " + (up ? "up" : "down");
+  pill.innerHTML = `<span class="dot"></span>${text}`;
+}
+
+// --- overview tab ---------------------------------------------------------
+async function setAlertStatus(id, status) {
+  await fetch(`/api/alerts/${id}/status?value=${status}`, {method: "POST"});
+  pollOverview();
+}
+
+function severityRank(s) { return s === "critical" ? 0 : 1; }
+
+async function pollOverview() {
+  let kpi;
+  try {
+    kpi = await (await fetch("/api/overview")).json();
+  } catch (e) { return; }
+  document.getElementById("kpi-active").textContent = kpi.active_keys;
+  document.getElementById("kpi-throttled").textContent = kpi.throttled_now;
+  document.getElementById("kpi-alerts1h").textContent = kpi.alerts_1h;
+  document.getElementById("kpi-open").textContent = kpi.open_incidents;
+  document.getElementById("kpi-ttd").textContent = kpi.mean_time_to_detect_s !== null
+    ? kpi.mean_time_to_detect_s + "s" : "-";
+
+  let feed;
+  try { feed = await (await fetch("/api/feed")).json(); } catch (e) { return; }
+  const alerts = feed.alerts.slice().sort((a,b) => severityRank(a.severity) - severityRank(b.severity)
+    || (b.ts||0) - (a.ts||0));
+
+  renderIncidents(alerts);
+}
+
+function renderIncidents(alerts) {
+  const list = document.getElementById("incidents-list");
+  list.innerHTML = "";
+  document.getElementById("incidents-empty").style.display = alerts.length ? "none" : "block";
+  for (const a of alerts) {
+    const div = document.createElement("div");
+    div.className = "incident " + a.severity;
+    const score = (a.fused_score !== null && a.fused_score !== undefined) ? a.fused_score.toFixed(3) : "-";
+    const thr = (a.threshold !== null && a.threshold !== undefined) ? a.threshold.toFixed(3) : "-";
+    const isOpen = expandedIncidents.has(a.id);
+    div.innerHTML = `
+      <div class="top">
+        ${KIND_ICON[a.kind] || ""}
+        <span class="sev-badge ${a.severity}">${a.severity}</span>
+        <span class="kind">${a.kind}</span>
+        <span class="meta">keys: ${a.keys.join(", ")} · ${a.ttd_s != null ? "detected " + a.ttd_s.toFixed(1) + "s after first query · " : ""}score ${score} / threshold ${thr}</span>
+      </div>
+      <div class="action">${a.action}</div>
+      <div class="triage">
+        <button data-act="acknowledged">Acknowledge</button>
+        <button data-act="resolved">Resolve</button>
+        <button class="danger" data-act="false_positive">Mark false positive</button>
+        <span class="status-tag ${a.status}">status: ${a.status.replace("_"," ")}</span>
+        <button class="detail-toggle" data-toggle="1">${isOpen ? "Hide details" : "Show evidence"}</button>
+      </div>
+      ${isOpen ? incidentDetailHtml(a) : ""}`;
+    div.querySelectorAll("button[data-act]").forEach(btn => {
+      btn.onclick = () => setAlertStatus(a.id, btn.dataset.act);
+    });
+    div.querySelector("button[data-toggle]").onclick = () => {
+      if (expandedIncidents.has(a.id)) expandedIncidents.delete(a.id);
+      else expandedIncidents.add(a.id);
+      renderIncidents(alerts);
+    };
+    list.appendChild(div);
+  }
+}
+
+async function pollImpact() {
+  let d;
+  try { d = await (await fetch("/api/impact")).json(); } catch (e) { return; }
+  document.getElementById("impact-total").textContent = "$" + d.total_cost_usd.toFixed(2);
+  const rows = document.getElementById("impact-rows");
+  document.getElementById("impact-empty").style.display = d.keys.length ? "none" : "block";
+  const max = Math.max(0.01, ...d.keys.map(k => k.cost_usd));
+  rows.innerHTML = d.keys.map(k => `
+    <div class="impact-row">
+      <span style="font-family:var(--mono)">${k.key}</span>
+      <span>${k.n_queries} queries</span>
+      <span style="color:var(--amber);font-family:var(--mono)">$${k.cost_usd.toFixed(2)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(k.cost_usd/max)*100}%"></div></div>
+    </div>`).join("");
+}
+
+async function pollSparkline() {
+  let ts;
+  try { ts = await (await fetch("/api/timeseries")).json(); } catch (e) { return; }
+  const svg = document.getElementById("sparkline");
+  const n = ts.requests.length;
+  const W = 600, H = 100, PAD = 4;
+  const maxReq = Math.max(1, ...ts.requests);
+  const maxAlert = Math.max(1, ...ts.alerts);
+  const xAt = i => (i/(n-1))*W;
+  const yAt = (v, max) => H - PAD - (v/max)*(H-2*PAD);
+  const line = (arr, max) => arr.map((v,i) => `${xAt(i).toFixed(1)},${yAt(v,max).toFixed(1)}`).join(" ");
+  const area = (arr, max) => `${xAt(0)},${H} ` + line(arr, max) + ` ${xAt(n-1)},${H}`;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="fillTeal" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#9aa0a8" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="#9aa0a8" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${[0.25,0.5,0.75].map(f => `<line x1="0" y1="${H*f}" x2="${W}" y2="${H*f}" stroke="#262521" stroke-width="1"/>`).join("")}
+    <polygon points="${area(ts.requests, maxReq)}" fill="url(#fillTeal)"/>
+    <polyline points="${line(ts.requests, maxReq)}" fill="none" stroke="#9aa0a8" stroke-width="2"/>
+    <polyline points="${line(ts.alerts, maxAlert)}" fill="none" stroke="#e2536f" stroke-width="2"/>`;
+}
+
+// --- key inventory tab ------------------------------------------------
+async function pollInventory() {
+  let data;
+  try { data = await (await fetch("/api/keys/registry")).json(); } catch (e) { return; }
+  const body = document.getElementById("inventory-body");
+  body.innerHTML = "";
+  for (const k of data.keys) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable";
+    const gt = k.demo_ground_truth === "attack" ? "attack" : "benign";
+    tr.innerHTML = `<td>${k.key}</td><td>${k.label}</td>
+      <td><span class="badge ${gt}">${gt}</span></td>
+      <td><span class="badge ${k.status.replace(" ","-")}">${k.status}</span></td>
+      <td>${fmtAgo(k.last_seen_s_ago)}</td>`;
+    tr.onclick = () => openKeyDetail(k.key);
+    body.appendChild(tr);
+  }
+}
+
+// --- detection policy tab ----------------------------------------------
+async function pollPolicy() {
+  let data;
+  try { data = await (await fetch("/api/policy")).json(); } catch (e) { return; }
+  const legsEl = document.getElementById("policy-legs");
+  legsEl.innerHTML = "";
+  for (const leg of data.legs) {
+    const div = document.createElement("div");
+    div.className = "policy-card";
+    div.innerHTML = `<div class="name">${leg.name}</div>
+      <div class="paper">${leg.paper}</div>
+      <div class="summary">${leg.summary}</div>
+      <div class="thr">live threshold: ${leg.live_threshold !== null && leg.live_threshold !== undefined ? leg.live_threshold.toFixed(4) : "-"}</div>`;
+    legsEl.appendChild(div);
+  }
+  const meta = document.querySelector("#policy-meta tbody");
+  const rows = [
+    ["Window / step", `${data.window_seconds}s / ${data.step_seconds}s`],
+    ["Per-key z-score threshold", data.per_key_threshold?.toFixed(3) ?? "-"],
+    ["Campaign similarity threshold", data.sim_threshold ?? "-"],
+    ["Static rate-limit baseline", `${data.static_rate_limit_qps_baseline ?? "-"} qps`],
+    ["Calibrated on (benign windows)", data.calibrated_on_n_windows ?? "-"],
+    ["Calibrated on (benign clusters)", data.calibrated_on_n_clusters ?? "-"],
+    ["Calibrated on (fleet windows)", data.calibrated_on_n_fleet_windows ?? "-"],
+  ];
+  meta.innerHTML = rows.map(([k,v]) => `<tr><td style="font-family:var(--sans)">${k}</td><td>${v}</td></tr>`).join("");
+}
+
+function pollAll() {
+  pollScenarios(); pollFeed(); pollOverview(); pollSparkline();
+  pollInventory(); pollPolicy(); pollImpact();
+}
+pollAll();
+setInterval(pollAll, 1000);
+</script>
+</body>
+</html>

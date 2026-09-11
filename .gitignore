@@ -1,0 +1,12 @@
+data/
+__pycache__/
+*.pyc
+.server.pid
+results_train.log
+results_server.log
+results/traffic_log.jsonl
+results/alerts.jsonl
+sentry/model/victim.pt
+.DS_Store
+venv/
+.venv/

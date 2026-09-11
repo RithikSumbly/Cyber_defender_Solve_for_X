@@ -1,0 +1,10 @@
+torch
+torchvision
+fastapi
+uvicorn[standard]
+pydantic
+scikit-learn
+scipy
+numpy
+matplotlib
+requests

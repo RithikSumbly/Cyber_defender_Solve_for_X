@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SENTRY: Guided Walkthrough</title>
+<style>
+  :root {
+    --bg: #0a0a0b; --panel: #141413; --panel2: #0d0d0d; --panel-hover: #1b1a18;
+    --border: #262521; --border-soft: #1c1b18;
+    --text: #f2efe8; --muted: #9a948a; --dim: #5c574d;
+    --accent: #d9a635; --gold-bright: #f6c65a; --gold-dim: #6e4e12;
+    --gold-glow: rgba(246,198,90,0.35); --accent-soft: rgba(217,166,53,0.14);
+    --green: #34c98d; --red: #e2536f;
+    --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+  .shell { display: flex; flex-direction: column; height: 100vh; }
+
+  header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+           gap: 20px; padding: 14px 24px; border-bottom: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mark { width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+          background: linear-gradient(135deg, var(--gold-bright) 0%, var(--accent) 55%, var(--gold-dim) 100%);
+          box-shadow: 0 0 14px var(--gold-glow); display: flex; align-items: center; justify-content: center;
+          font-weight: 800; font-size: 15px; color: #1a1408; }
+  .brand h1 { margin: 0; font-size: 16px; letter-spacing: 0.02em;
+              background: linear-gradient(135deg, var(--gold-bright) 0%, var(--accent) 55%, var(--gold-dim) 100%);
+              -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .pill { display: flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px;
+          font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); color: var(--muted); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+  .pill.up { color: var(--green); border-color: rgba(52,201,141,0.35); background: rgba(52,201,141,0.10); }
+  .pill.up .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  .stage { flex: 1; display: flex; min-height: 0; }
+  .console { flex: 1; min-width: 0; border-right: 1px solid var(--border); }
+  .console iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+
+  aside { width: 420px; flex-shrink: 0; display: flex; flex-direction: column; overflow-y: auto;
+          padding: 18px 20px 20px; gap: 16px; }
+  .steps { display: flex; flex-direction: column; gap: 4px; }
+  .steps button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+                  background: none; border: 1px solid transparent; border-radius: 9px; color: var(--muted);
+                  padding: 8px 10px; font-size: 12.5px; cursor: pointer; font-family: var(--sans); }
+  .steps button:hover { background: var(--panel-hover); color: var(--text); }
+  .steps button.current { border-color: rgba(246,198,90,0.35); background: var(--accent-soft); color: var(--text); }
+  .steps .num { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center;
+                justify-content: center; font-size: 10.5px; font-weight: 700; border: 1px solid var(--border);
+                color: var(--muted); }
+  .steps .done .num { background: var(--accent); border-color: var(--accent); color: #1a1408; }
+  .steps .failed .num { border-color: var(--red); color: var(--red); }
+  .steps .running .num { border-color: var(--green); color: var(--green); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .card { border-radius: 14px; padding: 18px; background: linear-gradient(180deg, var(--panel), var(--panel2));
+          border: 1px solid var(--border);
+          box-shadow: 0 1px 0 rgba(255,255,255,0.045) inset, 0 20px 40px -24px rgba(0,0,0,0.7); }
+  .card .idx { font-family: var(--mono); font-size: 10.5px; color: var(--accent); text-transform: uppercase;
+               letter-spacing: 0.08em; margin-bottom: 8px; }
+  .card h2 { margin: 0 0 12px; font-size: 19px; line-height: 1.3; }
+  .card .label { font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em;
+                 margin: 12px 0 4px; }
+  .card .body { font-size: 13.5px; line-height: 1.6; color: #e4e0d6; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  button.primary { background: linear-gradient(135deg, var(--gold-bright), var(--accent)); color: #1a1408;
+                   border: none; font-weight: 700; padding: 10px 16px; border-radius: 9px; cursor: pointer;
+                   font-size: 13px; box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 8px 20px -10px rgba(0,0,0,0.6); }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border);
+                     padding: 10px 14px; border-radius: 9px; cursor: pointer; font-size: 13px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .live { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .result { margin-top: 14px; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.55;
+            border: 1px solid rgba(246,198,90,0.4); background: rgba(246,198,90,0.07); color: var(--text); }
+  .result.warn { border-color: rgba(226,83,111,0.45); background: rgba(226,83,111,0.08); }
+  .note { font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .progress { height: 3px; background: var(--panel2); flex-shrink: 0; }
+  .progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--gold-dim), var(--gold-bright)); transition: width .6s; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand">
+      <div class="mark">S</div>
+      <div>
+        <h1>SENTRY Guided Walkthrough</h1>
+        <p>Every step sends real traffic to the running model. Every result is read back from the detector's own alert log.</p>
+      </div>
+    </div>
+    <div class="pill" id="api-pill"><span class="dot"></span><span id="api-text">checking API</span></div>
+  </header>
+  <div class="progress"><div class="progress-fill" id="progress-fill"></div></div>
+
+  <div class="stage">
+    <div class="console"><iframe id="console" src="/console" title="SENTRY operations console"></iframe></div>
+    <aside>
+      <div class="steps" id="steps"></div>
+      <div class="card" id="card"></div>
+      <div class="note">The console on the left is the same operations console an operator uses in production.
+        It updates every second from the live traffic and alert logs.</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+let STEPS = [];
+let current = 0;
+let status = { running: null, phase: "idle", results: {} };
+const appliedAfter = {};
+const appliedDuring = {};
+
+function consoleDoc() {
+  try { return document.getElementById("console").contentDocument; } catch (e) { return null; }
+}
+
+document.getElementById("console").addEventListener("load", () => {
+  const doc = consoleDoc();
+  if (!doc) return;
+  const style = doc.createElement("style");
+  style.textContent = ".tour-focus { outline: 2px solid #f6c65a; outline-offset: 5px; border-radius: 14px; transition: outline-color .4s; }";
+  doc.head.appendChild(style);
+});
+
+function focusConsole(target, openEvidence) {
+  const doc = consoleDoc();
+  if (!doc || !target) return;
+  const [view, selector] = target;
+  const nav = doc.querySelector(`.navbtn[data-view="${view}"]`);
+  if (nav) nav.click();
+  setTimeout(() => {
+    const el = doc.querySelector(selector);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("tour-focus");
+    setTimeout(() => el.classList.remove("tour-focus"), 5000);
+    if (openEvidence) {
+      const toggle = el.querySelector("button[data-toggle]");
+      if (toggle && toggle.textContent.includes("Show")) toggle.click();
+    }
+  }, 350);
+}
+
+function renderSteps() {
+  const box = document.getElementById("steps");
+  box.innerHTML = "";
+  STEPS.forEach((s, i) => {
+    const r = status.results[s.key];
+    const cls = status.running === s.key ? "running" : r ? (r.ok ? "done" : "failed") : "";
+    const btn = document.createElement("button");
+    btn.className = cls + (i === current ? " current" : "");
+    btn.innerHTML = `<span class="num">${i + 1}</span><span>${s.title}</span>`;
+    btn.onclick = () => { current = i; render(); };
+    box.appendChild(btn);
+  });
+}
+
+function renderCard() {
+  const s = STEPS[current];
+  if (!s) return;
+  const r = status.results[s.key];
+  const isRunning = status.running === s.key;
+  const otherRunning = status.running && !isRunning;
+
+  let live = "";
+  if (isRunning) {
+    const elapsed = status.elapsed_s !== null && status.elapsed_s !== undefined ? `${status.elapsed_s}s` : "";
+    if (status.phase === "detected") {
+      live = `<div class="result">${status.detail}</div><div class="live">Attacker traffic still arriving and being throttled. ${elapsed}</div>`;
+    } else {
+      live = `<div class="live">${status.detail || "Running"} ${elapsed}</div>`;
+    }
+  } else if (r) {
+    live = `<div class="result ${r.ok ? "" : "warn"}">${r.text}</div>`;
+  }
+
+  const runLabel = isRunning ? "Running" : otherRunning ? "Another step is running" : r ? "Run again" : "Run this step";
+  const nextBtn = current < STEPS.length - 1
+    ? `<button class="secondary" id="next-btn" ${isRunning ? "disabled" : ""}>Next step</button>` : "";
+
+  document.getElementById("card").innerHTML = `
+    <div class="idx">Step ${current + 1} of ${STEPS.length}</div>
+    <h2>${s.title}</h2>
+    <div class="label">What happens</div>
+    <div class="body">${s.what}</div>
+    <div class="label">Where to look</div>
+    <div class="body">${s.watch}</div>
+    ${s.how ? `<div class="label">How it works</div><div class="body">${s.how}</div>` : ""}
+    ${live}
+    <div class="actions">
+      <button class="primary" id="run-btn" ${status.running ? "disabled" : ""}>${runLabel}</button>
+      ${nextBtn}
+    </div>`;
+
+  document.getElementById("run-btn").onclick = () => runStep(s);
+  const next = document.getElementById("next-btn");
+  if (next) next.onclick = () => { current += 1; render(); };
+}
+
+function render() {
+  renderSteps();
+  renderCard();
+  const done = STEPS.filter((s) => status.results[s.key] && status.results[s.key].ok).length;
+  const fill = document.getElementById("progress-fill");
+  if (fill && STEPS.length) fill.style.width = `${(done / STEPS.length) * 100}%`;
+}
+
+async function runStep(s) {
+  const res = await fetch(`/tour/api/run/${s.key}`, { method: "POST" });
+  if (!res.ok) return;
+  appliedDuring[s.key] = Date.now();
+  focusConsole(s.during, false);
+  poll();
+}
+
+async function poll() {
+  try {
+    status = await (await fetch("/tour/api/status")).json();
+  } catch (e) {
+    return;
+  }
+  const pill = document.getElementById("api-pill");
+  pill.className = "pill" + (status.api_up ? " up" : "");
+  document.getElementById("api-text").textContent = status.api_up ? "live system" : "inference API unreachable";
+
+  for (const s of STEPS) {
+    const r = status.results[s.key];
+    if (r && appliedAfter[s.key] !== r.at && appliedDuring[s.key]) {
+      appliedAfter[s.key] = r.at;
+      if (STEPS[current] && STEPS[current].key === s.key) focusConsole(s.after, s.kind === "attack");
+    }
+  }
+  render();
+}
+
+(async () => {
+  STEPS = await (await fetch("/tour/api/steps")).json();
+  render();
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>
